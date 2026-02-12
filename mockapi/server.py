@@ -10,15 +10,32 @@ def create_app(datafile):
 
     def load_db():
         nonlocal db, counters
-        with open(datafile) as f:
-            db = json.load(f)
+        try:
+            with open(datafile) as f:
+                db = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            db = {}
         for col, items in db.items():
             if isinstance(items, list):
                 counters[col] = max((i.get('id', 0) for i in items), default=0)
 
     def save_db():
-        with open(datafile, 'w') as f:
-            json.dump(db, f, indent=2)
+        try:
+            with open(datafile, 'w') as f:
+                json.dump(db, f, indent=2)
+        except IOError:
+            pass
+
+    def validate_json_request():
+        if not request.is_json:
+            return jsonify({'error': 'Content-Type must be application/json'}), 400
+        try:
+            data = request.get_json(force=False)
+            if data is None:
+                return jsonify({'error': 'Invalid JSON'}), 400
+            return data
+        except Exception:
+            return jsonify({'error': 'Invalid JSON'}), 400
 
     load_db()
 
@@ -53,7 +70,14 @@ def create_app(datafile):
         if collection not in db:
             db[collection] = []
             counters[collection] = 0
-        item = request.get_json()
+        
+        item = validate_json_request()
+        if isinstance(item, tuple):  # Error response
+            return item
+        
+        if not isinstance(item, dict):
+            return jsonify({'error': 'Request body must be a JSON object'}), 400
+        
         counters[collection] += 1
         item['id'] = counters[collection]
         db[collection].append(item)
@@ -64,7 +88,14 @@ def create_app(datafile):
     def update_item(collection, item_id):
         if collection not in db:
             return jsonify({'error': 'not found'}), 404
-        data = request.get_json()
+        
+        data = validate_json_request()
+        if isinstance(data, tuple):  # Error response
+            return data
+        
+        if not isinstance(data, dict):
+            return jsonify({'error': 'Request body must be a JSON object'}), 400
+        
         for i, item in enumerate(db[collection]):
             if item.get('id') == item_id:
                 data['id'] = item_id
